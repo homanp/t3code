@@ -52,8 +52,8 @@ jobs:
             const isSafe = verdict === "safe";
 
             const labels = [
-              { name: "trust:verified", color: "1f883d", description: "Contributor passed trust analysis." },
-              { name: "trust:flagged",  color: "fbca04", description: "Contributor flagged for review by trust analysis." },
+              { name: "contributor:verified", color: "0969da", description: "Contributor passed trust analysis." },
+              { name: "contributor:flagged",  color: "e16f24", description: "Contributor flagged for review by trust analysis." },
             ];
 
             for (const label of labels) {
@@ -84,7 +84,7 @@ jobs:
               }
             }
 
-            const nextLabel = isSafe ? "trust:verified" : "trust:flagged";
+            const nextLabel = isSafe ? "contributor:verified" : "contributor:flagged";
             const labelNames = labels.map((l) => l.name);
 
             const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
