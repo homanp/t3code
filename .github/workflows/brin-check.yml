@@ -25,7 +25,7 @@ jobs:
           echo "$RESPONSE" >> "$GITHUB_OUTPUT"
           echo "BRIN_EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Post or update comment
+      - name: Apply label and comment
         uses: actions/github-script@v7
         env:
           BRIN_RESPONSE: ${{ steps.brin.outputs.response }}
@@ -49,44 +49,117 @@ jobs:
             const score = data.score;
             const verdict = data.verdict ?? "unknown";
             const confidence = data.confidence ?? "unknown";
+            const isSafe = verdict === "safe";
+
+            const labels = [
+              { name: "trust:verified", color: "1f883d", description: "Contributor passed trust analysis." },
+              { name: "trust:flagged",  color: "fbca04", description: "Contributor flagged for review by trust analysis." },
+            ];
+
+            for (const label of labels) {
+              try {
+                const { data: existing } = await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                });
+                if (existing.color !== label.color || (existing.description ?? "") !== label.description) {
+                  await github.rest.issues.updateLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description,
+                  });
+                }
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                  color: label.color,
+                  description: label.description,
+                });
+              }
+            }
+
+            const nextLabel = isSafe ? "trust:verified" : "trust:flagged";
+            const labelNames = labels.map((l) => l.name);
+
+            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+            });
+
+            const preserved = currentLabels
+              .map((l) => l.name)
+              .filter((name) => !labelNames.includes(name));
+
+            await github.rest.issues.setLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              labels: [...preserved, nextLabel],
+            });
+
+            core.info(`PR #${pr.number}: ${verdict} -> ${nextLabel}`);
+
+            if (isSafe) {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                per_page: 100,
+              });
+              const existing = comments.find((c) => c.body?.includes(marker));
+              if (existing) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                });
+              }
+              return;
+            }
+
+            const sub = data.sub_scores ?? {};
+            const fmt = (v) => (v != null ? String(Math.round(v)) : "—");
 
             const verdictEmoji = {
-              safe: "\u2705",
               caution: "\u26A0\uFE0F",
               suspicious: "\u26D4",
               dangerous: "\uD83D\uDEA8",
             }[verdict] ?? "\u2753";
 
-            const sub = data.sub_scores ?? {};
-            const fmt = (v) => (v != null ? String(Math.round(v)) : "—");
-
             let body = `${marker}\n`;
-            body += `### ${verdictEmoji} Contributor Trust Check\n\n`;
+            body += `### ${verdictEmoji} Contributor Trust Check — Flagged\n\n`;
+            body += `The author of this PR was flagged by an automated trust analysis. `;
+            body += `This does not necessarily mean the PR is malicious — it means one or more signals warrant a closer look.\n\n`;
             body += `| | |\n|---|---|\n`;
             body += `| **Author** | [@${data.name}](https://github.com/${data.name}) |\n`;
             body += `| **Score** | **${score}**/100 |\n`;
             body += `| **Verdict** | ${verdict} |\n`;
             body += `| **Confidence** | ${confidence} |\n\n`;
 
-            body += `<details>\n<summary>Dimension breakdown</summary>\n\n`;
-            body += `| Dimension | Score |\n|-----------|-------|\n`;
-            body += `| Identity | ${fmt(sub.identity)} |\n`;
-            body += `| Behavior | ${fmt(sub.behavior)} |\n`;
-            body += `| Content | ${fmt(sub.content)} |\n`;
-            body += `| Graph | ${fmt(sub.graph)} |\n`;
-            body += `</details>\n\n`;
+            body += `#### Why was this flagged?\n\n`;
+            body += `| Dimension | Score | What it measures |\n|-----------|-------|------------------|\n`;
+            body += `| Identity | ${fmt(sub.identity)} | Account age, contribution history, GPG keys, org memberships |\n`;
+            body += `| Behavior | ${fmt(sub.behavior)} | PR patterns, unsolicited contribution ratio, activity cadence |\n`;
+            body += `| Content | ${fmt(sub.content)} | PR body substance, issue linkage, contribution quality |\n`;
+            body += `| Graph | ${fmt(sub.graph)} | Cross-repo trust, co-contributor relationships |\n\n`;
 
             if (data.threats && data.threats.length > 0) {
-              body += `#### Detected threats\n\n`;
-              body += `| Type | Severity | Detail |\n|------|----------|--------|\n`;
+              body += `#### Detected signals\n\n`;
+              body += `| Signal | Severity | Detail |\n|--------|----------|--------|\n`;
               for (const t of data.threats) {
                 body += `| ${t.type} | ${t.severity} | ${t.detail} |\n`;
               }
               body += `\n`;
             }
 
-            body += `<sub>Scanned by [Brin](https://brin.sh) — analyzes GitHub identity, behavior, and contribution patterns to help maintainers assess contributor trust. `;
-            body += `[Full profile](${data.url}?details=true)</sub>\n`;
+            body += `<sub>Analyzed by [Brin](https://brin.sh) · [Full profile](${data.url}?details=true)</sub>\n`;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -95,16 +168,15 @@ jobs:
               per_page: 100,
             });
 
-            const existing = comments.find((c) => c.body?.includes(marker));
+            const existingComment = comments.find((c) => c.body?.includes(marker));
 
-            if (existing) {
+            if (existingComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                comment_id: existing.id,
+                comment_id: existingComment.id,
                 body,
               });
-              core.info(`Updated comment ${existing.id} on PR #${pr.number}`);
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
@@ -112,5 +184,4 @@ jobs:
                 issue_number: pr.number,
                 body,
               });
-              core.info(`Created comment on PR #${pr.number}`);
             }
