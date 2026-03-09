@@ -20,7 +20,8 @@ jobs:
         id: brin
         run: |
           AUTHOR="${{ github.event.pull_request.user.login }}"
-          RESPONSE=$(curl -sf "https://api.brin.sh/contributor/${AUTHOR}?details=true&mode=full" || echo '{}')
+          # MOCK: simulating a flagged contributor for testing
+          RESPONSE='{"origin":"contributor","name":"nassimna","score":42,"confidence":"medium","verdict":"suspicious","tolerance":"conservative","scanned_at":"2026-03-09T14:00:00Z","url":"https://api.brin.sh/contributor/nassimna","sub_scores":{"identity":30,"behavior":35,"content":55,"graph":null},"threats":[{"type":"pr_spray","severity":"high","detail":"12 PRs opened in 24h targeting 6 different repositories"},{"type":"unsolicited_pr_pattern","severity":"medium","detail":"85% of recent PRs target repos with no prior commit history"},{"type":"low_effort_pr","severity":"medium","detail":"4 of 6 recent PRs have empty or single-line descriptions"}]}'
           echo "response<<BRIN_EOF" >> "$GITHUB_OUTPUT"
           echo "$RESPONSE" >> "$GITHUB_OUTPUT"
           echo "BRIN_EOF" >> "$GITHUB_OUTPUT"
