@@ -20,8 +20,7 @@ jobs:
         id: brin
         run: |
           AUTHOR="${{ github.event.pull_request.user.login }}"
-          # MOCK: simulating alxDisplayr (flagged contributor) for testing
-          RESPONSE='{"origin":"contributor","name":"alxDisplayr","score":73,"confidence":"medium","verdict":"caution","tolerance":"conservative","scanned_at":"2026-03-09T14:00:00Z","url":"https://api.brin.sh/contributor/alxDisplayr","sub_scores":{"identity":75,"behavior":55,"content":100,"graph":null},"threats":[{"type":"pr_rejected_across_repos","severity":"medium","detail":"PRs closed without merge in 43 distinct repos"},{"type":"low_merge_rate","severity":"low","detail":"43 PRs closed without merge, 0 merged"}]}'
+          RESPONSE=$(curl -sf "https://api.brin.sh/contributor/${AUTHOR}?details=true&mode=full" || echo '{}')
           echo "response<<BRIN_EOF" >> "$GITHUB_OUTPUT"
           echo "$RESPONSE" >> "$GITHUB_OUTPUT"
           echo "BRIN_EOF" >> "$GITHUB_OUTPUT"
